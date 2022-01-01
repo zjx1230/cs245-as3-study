@@ -1,5 +1,6 @@
 package cs245.as3;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 

@@ -22,5 +22,5 @@ public interface StorageManager {
 	/**
 	 * Queues a write to storage with the given key, tag, and value.
 	 */
-	public void queueWrite(long key, long tag, byte[] value);
+	public void queueWrite(long key, long tag, byte[] value);	// tag log offset
 }
