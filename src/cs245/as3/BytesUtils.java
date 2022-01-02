@@ -1,5 +1,8 @@
 package cs245.as3;
 
+import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
+
 /**
  * 类型转成字节数组的工具类
  *
@@ -68,5 +71,72 @@ public class BytesUtils {
     long i6 = (long) (((long)(arr[6] & 0xff)) << 6 * 8);
     long i7 = (long) (((long)(arr[7] & 0xff)) << 7 * 8);
     return i0 + i1 + i2 + i3 + i4 + i5 + i6 + i7;
+  }
+
+  /**
+   * byteToLogRecord
+   * @param arr
+   * @return
+   */
+  public static LogRecord byteToLogRecord(byte[] arr) {
+    ByteArrayInputStream input = new ByteArrayInputStream(arr);
+    LogRecord logRecord = new LogRecord();
+
+    int type = input.read();
+    logRecord.setType(type);
+    byte[] longByte = new byte[8];
+    byte[] intByte = new byte[4];
+
+    switch (type) {
+      case LogRecordType.START_TXN:
+        // type + txID + size; 1 + 8 + 4
+        input.read(longByte, 0, 8);
+        long txnId = byteToLong(longByte);
+        logRecord.setTxID(txnId); // txnId
+        break;
+      case LogRecordType.OPERATION:
+        // type + txID + key + value + size; 1 + 8 + 8 + value.length + 4
+        input.read(longByte, 0, 8);
+        txnId = byteToLong(longByte);
+        logRecord.setTxID(txnId); // txnId
+
+        input.read(longByte, 0, 8);
+        long key = byteToLong(longByte);
+        logRecord.setKey(key);  // key
+        byte[] v = new byte[input.available() - 4];
+        input.read(v, 0, v.length);
+        logRecord.setValue(v);  // value
+        break;
+      case LogRecordType.COMMIT_TXN:
+        // type + txID + size; 1 + 8 + 4
+        input.read(longByte, 0, 8);
+        txnId = byteToLong(longByte);
+        logRecord.setTxID(txnId); // txnId
+        break;
+      case LogRecordType.START_CKPT:
+        // type + activeTSize + activeTSize * 8 + activeTxnStartEarlistOffset + size; 1 + 4 + activeTxns.size() * 8 + 8 + 4
+        input.read(intByte, 0, 4);
+        int activeTSize = byteToInt(intByte);
+        ArrayList<Long> txnIds = new ArrayList<>();
+        for (int i = 0; i < activeTSize; i ++) {
+          input.read(longByte, 0, 8);
+          txnId = byteToLong(longByte);
+          txnIds.add(txnId);
+        }
+        logRecord.setActiveTxns(txnIds);  // activeTxns
+        input.read(longByte, 0, 8);
+        logRecord.setActiveTxnStartEarlistOffset(byteToLong(longByte)); // activeTxnStartEarlistOffset
+        break;
+      case LogRecordType.END_CKPT:
+        // type + size; 1 + 4
+        break;
+      default:
+        // abort do nothing
+    }
+
+    input.read(intByte, 0, 4);
+    int size = byteToInt(intByte);
+    logRecord.setSize(size);
+    return logRecord;
   }
 }

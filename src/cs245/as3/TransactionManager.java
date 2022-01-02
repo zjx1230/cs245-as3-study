@@ -37,10 +37,13 @@ public class TransactionManager {
 	  */
 	private HashMap<Long, ArrayList<WritesetEntry>> writesets;
 
+	private ByteArrayOutputStream bArray;
+
 	public TransactionManager() {
 		writesets = new HashMap<>();
 		//see initAndRecover
 		latestValues = null;
+		bArray = new ByteArrayOutputStream();
 	}
 
 	/**
