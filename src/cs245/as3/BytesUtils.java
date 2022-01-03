@@ -114,9 +114,8 @@ public class BytesUtils {
         logRecord.setTxID(txnId); // txnId
         break;
       case LogRecordType.START_CKPT:
-        // type + activeTSize + activeTSize * 8 + activeTxnStartEarlistOffset + size; 1 + 4 + activeTxns.size() * 8 + 8 + 4
-        input.read(intByte, 0, 4);
-        int activeTSize = byteToInt(intByte);
+        // type + activeTSize * 8 + activeTxnStartEarlistOffset + size; 1 + activeTxns.size() * 8 + 4 + 4
+        int activeTSize = (arr.length - 1 - 4 - 4) / 8;
         ArrayList<Long> txnIds = new ArrayList<>();
         for (int i = 0; i < activeTSize; i ++) {
           input.read(longByte, 0, 8);
@@ -124,8 +123,8 @@ public class BytesUtils {
           txnIds.add(txnId);
         }
         logRecord.setActiveTxns(txnIds);  // activeTxns
-        input.read(longByte, 0, 8);
-        logRecord.setActiveTxnStartEarlistOffset(byteToLong(longByte)); // activeTxnStartEarlistOffset
+        input.read(intByte, 0, 4);
+        logRecord.setActiveTxnStartEarlistOffset(byteToInt(intByte)); // activeTxnStartEarlistOffset
         break;
       case LogRecordType.END_CKPT:
         // type + size; 1 + 4

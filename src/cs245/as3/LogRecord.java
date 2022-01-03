@@ -39,7 +39,7 @@ public class LogRecord {
 //  /**
 //   * 上一条日志记录偏移量
 //   */
-//  private long preOffset; // 8字节
+//  private long preOffset; // 8字节 todo int 加一个这个字段降低读的次数
 
   /**
    * 活跃事务数量 用于生成检查点 具体实现用activeTxns.size()获得
@@ -54,7 +54,7 @@ public class LogRecord {
   /**
    * 活跃事务集合中最早开始的偏移量
    */
-  private long activeTxnStartEarlistOffset; // 8字节
+  private int activeTxnStartEarlistOffset; // 8字节
 
   /**
    * 日志记录的大小
@@ -122,11 +122,11 @@ public class LogRecord {
     this.activeTxns = activeTxns;
   }
 
-  public long getActiveTxnStartEarlistOffset() {
+  public int getActiveTxnStartEarlistOffset() {
     return activeTxnStartEarlistOffset;
   }
 
-  public void setActiveTxnStartEarlistOffset(long activeTxnStartEarlistOffset) {
+  public void setActiveTxnStartEarlistOffset(int activeTxnStartEarlistOffset) {
     this.activeTxnStartEarlistOffset = activeTxnStartEarlistOffset;
   }
 
@@ -152,14 +152,14 @@ public class LogRecord {
         arrayOutputStream.write(b, 0, b.length);
         break;
       case LogRecordType.START_CKPT:
-        size = 1 + 4 + activeTxns.size() * 8 + 8 + 4; // type + activeTSize + activeTSize * 8 + activeTxnStartEarlistOffset + size;
-        b = BytesUtils.intToByte(activeTxns.size());
-        arrayOutputStream.write(b, 0, b.length);
+        size = 1 + activeTxns.size() * 8 + 4 + 4; // type + activeTSize * 8 + activeTxnStartEarlistOffset + size;
+//        b = BytesUtils.intToByte(activeTxns.size());
+//        arrayOutputStream.write(b, 0, b.length);
         for (long txnId : activeTxns) {
           b = BytesUtils.longToByte(txnId);
           arrayOutputStream.write(b, 0, b.length);
         }
-        b = BytesUtils.longToByte(activeTxnStartEarlistOffset);
+        b = BytesUtils.intToByte(activeTxnStartEarlistOffset);
         arrayOutputStream.write(b, 0, b.length);
         break;
       case LogRecordType.END_CKPT:

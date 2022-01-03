@@ -11,6 +11,7 @@ import cs245.as3.interfaces.LogManager;
 import cs245.as3.interfaces.StorageManager;
 import cs245.as3.interfaces.StorageManager.TaggedValue;
 import java.util.HashSet;
+import java.util.Map.Entry;
 
 /**
  * You will implement this class.
@@ -39,7 +40,8 @@ public class TransactionManager {
 	/**
 	  * Hold on to writesets until commit.
 	  */
-	private HashMap<Long, ArrayList<WritesetEntry>> writesets;
+//	private HashMap<Long, ArrayList<WritesetEntry>> writesets;
+	private HashMap<Long, HashMap<Long, byte[]> > writesets;
 
 	/**
 	 * 活跃的事务集合
@@ -76,17 +78,17 @@ public class TransactionManager {
 	/**
 	 * 每个事务的Start出现在日志中的偏移
 	 */
-	private HashMap<Long, Long> earlistTxns;
+	private HashMap<Long, Integer> earlistTxns;
 
 	/**
 	 * 每个事务中所操作key的最后一条偏移
 	 */
-	private HashMap<Long, HashMap<Long, Long> > txnsOffsetMap;
+	private HashMap<Long, HashMap<Long, Integer> > txnsOffsetMap;
 
 	/**
 	 * 截断点
 	 */
-	private long trunctionPos;
+	private int trunctionPos;
 
 	private StorageManager sm;
 
@@ -148,7 +150,7 @@ public class TransactionManager {
 				case LogRecordType.START_CKPT:
 					//System.out.println("getLogEndOffset: " + lm.getLogEndOffset() + " getLogTruncationOffset: " + limitPos);
 					if (isEndCkpt && checkLimitPos == -1) {
-						checkLimitPos = (int) logRecord.getActiveTxnStartEarlistOffset();
+						checkLimitPos = logRecord.getActiveTxnStartEarlistOffset();
 						for (Long txnId : logRecord.getActiveTxns()) {
 							needRedoTxns.add(txnId);
 						}
@@ -174,85 +176,6 @@ public class TransactionManager {
 				latestValues.put(logRecord.getKey(), new TaggedValue(logRecord.getOffset(), logRecord.getValue()));
 			}
 		}
-
-//		File file = new File("test.txt");
-//		FileWriter fileWritter = null;
-//		try {
-//			//if file doesnt exists, then create it
-//			if(!file.exists()){
-//				file.createNewFile();
-//			}
-//
-//			//true = append file
-//			fileWritter = new FileWriter(file.getName(),true);
-//
-//			// 开始从后往前扫描日志
-//			boolean isEndCkpt = false;	// 用于判断从后往前是否遇到结束检查点的日志
-//			int pos = lm.getLogEndOffset() - 4;
-//			int limitPos = lm.getLogTruncationOffset();
-//			if (pos < limitPos) return;
-//			byte[] intByte = lm.readLogRecord(pos, 4);
-//			int size = BytesUtils.byteToInt(intByte);
-//			pos = lm.getLogEndOffset() - size;
-//			HashSet<Long> needRedoTxns = new HashSet<>();
-//			ArrayList<LogRecord> logRecords = new ArrayList<>();
-//			int checkLimitPos = -1;	// 日志恢复需要检查的最小位置
-//			while (pos >= limitPos) {
-//				if (pos < checkLimitPos) break;
-//				byte[] b = lm.readLogRecord(pos, size);
-//				LogRecord logRecord = BytesUtils.byteToLogRecord(b);
-//				switch (logRecord.getType()) {
-//					case LogRecordType.OPERATION:
-//						fileWritter.write("key: " + logRecord.getKey() + "value: " + new String(logRecord.getValue()));
-//						//System.out.println("key: " + logRecord.getKey() + "value: " + new String(logRecord.getValue()));
-//						if (needRedoTxns.contains(logRecord.getTxID())) {
-//							logRecord.setOffset(pos);
-//							logRecords.add(logRecord);
-//						}
-////					logRecord.setOffset(pos);
-////					logRecords.add(logRecord);
-//						break;
-//					case LogRecordType.COMMIT_TXN:
-//						if (checkLimitPos == -1) needRedoTxns.add(logRecord.getTxID());
-//						break;
-//					case LogRecordType.START_CKPT:
-//						//System.out.println("getLogEndOffset: " + lm.getLogEndOffset() + " getLogTruncationOffset: " + limitPos);
-//						if (isEndCkpt && checkLimitPos == -1) {
-//							checkLimitPos = (int) logRecord.getActiveTxnStartEarlistOffset();
-//							for (Long txnId : logRecord.getActiveTxns()) {
-//								needRedoTxns.add(txnId);
-//							}
-//						}
-//						break;
-//					case LogRecordType.END_CKPT:
-//						isEndCkpt = true;
-//						break;
-//					default:
-//						// abort do nothing
-//				}
-//				if (pos - 4 < limitPos) break;
-//				intByte = lm.readLogRecord(pos - 4, 4);
-//				size = BytesUtils.byteToInt(intByte);
-//				pos -= size;
-//			}
-//
-//			// 开始重做
-//			for (int i = logRecords.size() - 1; i >= 0; i --) {
-//				LogRecord logRecord = logRecords.get(i);
-//				if (needRedoTxns.contains(logRecord.getTxID())) {
-//					sm.queueWrite(logRecord.getKey(), logRecord.getOffset(), logRecord.getValue());
-//					latestValues.put(logRecord.getKey(), new TaggedValue(logRecord.getOffset(), logRecord.getValue()));
-//				}
-//			}
-//		} catch (Exception e) {
-//			e.printStackTrace();
-//		} finally {
-//			try {
-//				fileWritter.close();
-//			} catch (IOException e) {
-//				e.printStackTrace();
-//			}
-//		}
 	}
 
 	/**
@@ -263,7 +186,7 @@ public class TransactionManager {
 		LogRecord logRecord = new LogRecord();
 		logRecord.setType(LogRecordType.START_TXN);
 		logRecord.setTxID(txID);
-		long offset = lm.appendLogRecord(logRecord.getByteArray(bArray));
+		int offset = lm.appendLogRecord(logRecord.getByteArray(bArray));
 		activeTxns.add(txID);
 		earlistTxns.put(txID, offset);
 		//doCheckPoint();
@@ -279,18 +202,22 @@ public class TransactionManager {
 	}
 
 	/**
-	 * Indicates a write to the database. Note that such writes should not be visible to read() 
-	 * calls until the transaction making the write commits. For simplicity, we will not make reads 
-	 * to this same key from txID itself after we make a write to the key. 
+	 * Indicates a write to the database. Note that such writes should not be visible to read()
+	 * calls until the transaction making the write commits. For simplicity, we will not make reads
+	 * to this same key from txID itself after we make a write to the key.
 	 */
 	public void write(long txID, long key, byte[] value) {
-		ArrayList<WritesetEntry> writeset = writesets.get(txID);
-		if (writeset == null) {
-			writeset = new ArrayList<>();
-			writesets.put(txID, writeset);
-		}
-		writeset.add(new WritesetEntry(key, value));
-		//doCheckPoint();
+//		ArrayList<WritesetEntry> writeset = writesets.get(txID);
+//		if (writeset == null) {
+//			writeset = new ArrayList<>();
+//			writesets.put(txID, writeset);
+//		}
+//		writeset.add(new WritesetEntry(key, value));
+		HashMap<Long, byte[]> writeset = writesets.getOrDefault(txID, new HashMap<>());
+		writeset.put(key, value);
+		writesets.put(txID, writeset);
+
+		doCheckPoint();
 	}
 
 	/**
@@ -307,7 +234,7 @@ public class TransactionManager {
 			// 添加检查点日志记录
 			LogRecord logRecord = new LogRecord();
 			ArrayList<Long> txns = new ArrayList<>();
-			long earlistLogSize = logSize + 1;
+			int earlistLogSize = logSize + 1;
 			for (Long txnId : activeTxns) {
 				earlistLogSize = Math.min(earlistLogSize, earlistTxns.get(txnId));
 				txns.add(txnId);
@@ -336,23 +263,25 @@ public class TransactionManager {
 		activeTxns.remove(txID);	// 已提交，则从当前活跃事务集合中删掉
 		commitTxns.add(txID);
 
-		ArrayList<WritesetEntry> writeset = writesets.get(txID);
+//		ArrayList<WritesetEntry> writeset = writesets.get(txID);
+		HashMap<Long, byte[]> writeset = writesets.get(txID);
 		ArrayList<LogRecord> logRecords = new ArrayList<>();
 		if (writeset != null) {
-			long tag = -1;
-			for(WritesetEntry x : writeset) {
+			int tag = -1;
+//			for(WritesetEntry x : writeset) {
+			for (Entry<Long, byte[]> x: writeset.entrySet()) {
 				// 添加日志
 				LogRecord logRecord = new LogRecord();
 				logRecord.setTxID(txID);
 				logRecord.setType(LogRecordType.OPERATION);
-				logRecord.setKey(x.key);
-				logRecord.setValue(x.value);
+				logRecord.setKey(x.getKey());
+				logRecord.setValue(x.getValue());
 				tag = lm.appendLogRecord(logRecord.getByteArray(bArray));
-				latestValues.put(x.key, new TaggedValue(tag, x.value));
-				HashMap<Long, Long> txn = txnsOffsetMap.getOrDefault(txID, new HashMap<>());
-				txn.put(x.key, tag);
+				latestValues.put(x.getKey(), new TaggedValue(tag, x.getValue()));
+				HashMap<Long, Integer> txn = txnsOffsetMap.getOrDefault(txID, new HashMap<>());
+				txn.put(x.getKey(), tag);
 				txnsOffsetMap.put(txID, txn);
-				logRecord.setOffset((int)tag);
+				logRecord.setOffset(tag);
 				logRecords.add(logRecord);
 			}
 			writesets.remove(txID);
@@ -368,7 +297,7 @@ public class TransactionManager {
 			sm.queueWrite(logRecord1.getKey(), logRecord1.getOffset(), logRecord1.getValue());	// 异步的
 		}
 
-		doCheckPoint();
+		//doCheckPoint();
 //		for (LogRecord logRecord1 : logRecords) {
 //			sm.queueWrite(logRecord1.getKey(), logRecord1.getOffset(), logRecord1.getValue());	// 异步的
 //		}
@@ -394,7 +323,7 @@ public class TransactionManager {
 	 * These calls are in order of writes to a key and will occur once for every such queued write, unless a crash occurs.
 	 */
 	public void writePersisted(long key, long persisted_tag, byte[] persisted_value) {	// 表明该数据已经持久化了
-		//doCheckPoint();
+		doCheckPoint();
 		ArrayList<Long> txns = new ArrayList<>();
 		for (Long txnId : commitTxns) {
 			if (txnsOffsetMap.containsKey(txnId)) {
@@ -418,7 +347,7 @@ public class TransactionManager {
 			LogRecord logRecord = new LogRecord();
 			logRecord.setType(LogRecordType.END_CKPT);
 			lm.appendLogRecord(logRecord.getByteArray(bArray));
-			lm.setLogTruncationOffset((int)trunctionPos);	// 截断用于快速恢复
+			lm.setLogTruncationOffset(trunctionPos);	// 截断用于快速恢复
 			isInCKPT = false;
 		}
 	}
