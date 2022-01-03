@@ -131,7 +131,10 @@ public class BytesUtils {
         // type + size; 1 + 4
         break;
       default:
-        // abort do nothing
+        // abort
+        input.read(longByte, 0, 8);
+        txnId = byteToLong(longByte);
+        logRecord.setTxID(txnId); // txnId
     }
 
     input.read(intByte, 0, 4);

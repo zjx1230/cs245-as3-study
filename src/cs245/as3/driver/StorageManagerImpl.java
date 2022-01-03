@@ -27,7 +27,7 @@ public class StorageManagerImpl implements StorageManager {
 		//latest_version always points to the end of versions
 		//persisted_version always points to the start of versions
 		volatile TaggedValue latest_version;
-		volatile TaggedValue persisted_version;
+		volatile TaggedValue persisted_version;	// 用于模拟非易失介质上存的数据
 		ArrayDeque<TaggedValue> versions;
 		
 		public StorageManagerEntry() {
@@ -165,7 +165,7 @@ public class StorageManagerImpl implements StorageManager {
 		return did_persistence;
 	}
 	
-	protected boolean do_persistence_work() {
+	protected boolean do_persistence_work() {	// 用于模拟缓冲区数据落盘操作(随机)
 		boolean did_work = false;
 		//Perform a fuzzy checkpoint. Go over all keys and persist while simulating a delay.
 		for(Entry<Long, StorageManagerEntry> entry : entries.entrySet()) {

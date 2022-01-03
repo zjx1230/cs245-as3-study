@@ -61,6 +61,11 @@ public class LogRecord {
    */
   private int size; // 4个字节
 
+  /**
+   * 在日志中的偏移量，不会序列化
+   */
+  private volatile int offset;
+
   public int getSize() {
     return size;
   }
@@ -101,13 +106,13 @@ public class LogRecord {
     this.value = value;
   }
 
-//  public int getActiveTSize() {
-//    return activeTSize;
-//  }
-//
-//  public void setActiveTSize(int activeTSize) {
-//    this.activeTSize = activeTSize;
-//  }
+  public int getOffset() {
+    return offset;
+  }
+
+  public void setOffset(int offset) {
+    this.offset = offset;
+  }
 
   public ArrayList<Long> getActiveTxns() {
     return activeTxns;
@@ -161,7 +166,10 @@ public class LogRecord {
         size = 1 + 4; // type + size;
         break;
       default:
-        // abort do nothing
+        // abort
+        size = 1 + 8 + 4; // type + txnId + size
+        b = BytesUtils.longToByte(txID);
+        arrayOutputStream.write(b, 0, b.length);
     }
 
     byte[] b = BytesUtils.intToByte(size);
