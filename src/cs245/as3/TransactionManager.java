@@ -85,6 +85,11 @@ public class TransactionManager {
 	 */
 	private HashMap<Long, HashMap<Long, Integer> > txnsOffsetMap;
 
+//	/**
+//	 * 存储每个事务对应的操作日志记录偏移(倒序)
+//	 */
+//	private HashMap<Long, ArrayList<Integer>> txnsRecordOffsetMap;
+
 	/**
 	 * 截断点
 	 */
@@ -226,10 +231,9 @@ public class TransactionManager {
 		// 做检查点
 		int logSize = lm.getLogEndOffset();
 
-		//System.out.println("logSize : " + logSize + " preLogSize: " + preLogSize);
 		if (!isInCKPT && preLogSize != 0 && logSize - preLogSize > 300) {
 			preLogSize = logSize;
-			//System.out.println("logSize : " + logSize + " preLogSize: " + preLogSize);
+
 			// 添加检查点日志记录
 			LogRecord logRecord = new LogRecord();
 			ArrayList<Long> txns = new ArrayList<>();
@@ -277,12 +281,14 @@ public class TransactionManager {
 				logRecord.setValue(x.getValue());
 				logRecord.setPreOffset(preLogPos);
 				preLogPos = lm.appendLogRecord(logRecord.getByteArray(bArray));
+
 				latestValues.put(x.getKey(), new TaggedValue(preLogPos, x.getValue()));
 				HashMap<Long, Integer> txn = txnsOffsetMap.getOrDefault(txID, new HashMap<>());
 				txn.put(x.getKey(), preLogPos);
 				txnsOffsetMap.put(txID, txn);
 				logRecord.setOffset(preLogPos);
 				logRecords.add(logRecord);
+
 			}
 			writesets.remove(txID);
 		}

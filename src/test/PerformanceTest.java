@@ -21,9 +21,9 @@ public class PerformanceTest {
   @Test
   public void TestPerfomance() {
     int ans = 0;
-    for (int i = 0; i < 10; i ++) {
+    for (int i = 0; i < 100; i ++) {
       ans += LeaderboardTests.TestWriteOps();
     }
-    System.out.println(ans / 10);
+    System.out.println(ans / 100);
   }
 }
