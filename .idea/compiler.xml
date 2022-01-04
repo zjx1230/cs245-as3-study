@@ -9,7 +9,7 @@
         <module name="transaction-processor" />
       </profile>
     </annotationProcessing>
-    <bytecodeTargetLevel>
+    <bytecodeTargetLevel target="11">
       <module name="transaction-processor" target="11" />
     </bytecodeTargetLevel>
   </component>

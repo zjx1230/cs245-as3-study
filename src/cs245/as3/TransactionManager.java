@@ -90,6 +90,11 @@ public class TransactionManager {
 	 */
 	private int trunctionPos;
 
+	/**
+	 * 维护上一条日志记录位置
+	 */
+	private int preLogPos;
+
 	private StorageManager sm;
 
 	private LogManager lm;
@@ -107,6 +112,7 @@ public class TransactionManager {
 		commitTxnsInCkpt = new ArrayList<>();
 		preLogSize = 0;
 		isInCKPT = false;
+		preLogPos = -1;
 	}
 
 	/**
@@ -117,43 +123,39 @@ public class TransactionManager {
 		latestValues = storageManager.readStoredTable();
 		sm = storageManager;
 		lm = logManager;
+		// 获取上一条日志记录位置偏移
+		int curPos = lm.getLogEndOffset();
+		if (curPos - 4 >= lm.getLogTruncationOffset()) {
+			byte[] b = lm.readLogRecord(curPos - 4, 4);
+			preLogPos = curPos - BytesUtils.byteToInt(b);
+		}
+
+		if (preLogPos == -1) return;
 
 		// 开始从后往前扫描日志
 		boolean isEndCkpt = false;	// 用于判断从后往前是否遇到结束检查点的日志
-		int pos = lm.getLogEndOffset() - 4;
-		int limitPos = lm.getLogTruncationOffset();
-		if (pos < limitPos) return;
-		byte[] intByte = lm.readLogRecord(pos, 4);
-		int size = BytesUtils.byteToInt(intByte);
-		pos = lm.getLogEndOffset() - size;
-		HashSet<Long> needRedoTxns = new HashSet<>();
-		ArrayList<LogRecord> logRecords = new ArrayList<>();
-		int checkLimitPos = -1;	// 日志恢复需要检查的最小位置
+		int pos = preLogPos;
+		int limitPos = lm.getLogTruncationOffset();		// 日志当前截断点
+		HashSet<Long> needRedoTxns = new HashSet<>();	// 存储需要重做的事务ID
+		ArrayList<LogRecord> logRecords = new ArrayList<>();	// 需要重做的日志记录
+		int checkLimitPos = -1;	// 日志恢复需要检查的最小位置，有的话就是从后往前扫描第一个与endCkpt记录匹配的startCkpt记录中活跃事务最早start的偏移
 		while (pos >= limitPos) {
 			if (pos < checkLimitPos) break;
-			byte[] b = lm.readLogRecord(pos, size);
+			byte[] b = lm.readLogRecord(pos, curPos - pos);
 			LogRecord logRecord = BytesUtils.byteToLogRecord(b);
 			switch (logRecord.getType()) {
 				case LogRecordType.OPERATION:
-					//fileWritter.write("key: " + logRecord.getKey() + "value: " + new String(logRecord.getValue()));
-					//System.out.println("key: " + logRecord.getKey() + "value: " + new String(logRecord.getValue()));
-					if (needRedoTxns.contains(logRecord.getTxID())) {
+					if (needRedoTxns.contains(logRecord.getTxID())) {	// 只存储需要重做的日志记录
 						logRecord.setOffset(pos);
 						logRecords.add(logRecord);
 					}
-//					logRecord.setOffset(pos);
-//					logRecords.add(logRecord);
 					break;
 				case LogRecordType.COMMIT_TXN:
 					if (checkLimitPos == -1) needRedoTxns.add(logRecord.getTxID());
 					break;
 				case LogRecordType.START_CKPT:
-					//System.out.println("getLogEndOffset: " + lm.getLogEndOffset() + " getLogTruncationOffset: " + limitPos);
 					if (isEndCkpt && checkLimitPos == -1) {
-						checkLimitPos = logRecord.getActiveTxnStartEarlistOffset();
-						for (Long txnId : logRecord.getActiveTxns()) {
-							needRedoTxns.add(txnId);
-						}
+						checkLimitPos = logRecord.getActiveTxnStartEarlistOffset();	// START_CKPT活跃事务中最早start的偏移
 					}
 					break;
 				case LogRecordType.END_CKPT:
@@ -162,19 +164,15 @@ public class TransactionManager {
 				default:
 					// abort do nothing
 			}
-			if (pos - 4 < limitPos) break;
-			intByte = lm.readLogRecord(pos - 4, 4);
-			size = BytesUtils.byteToInt(intByte);
-			pos -= size;
+			curPos = pos;
+			pos = logRecord.getPreOffset();
 		}
 
 		// 开始重做
 		for (int i = logRecords.size() - 1; i >= 0; i --) {
 			LogRecord logRecord = logRecords.get(i);
-			if (needRedoTxns.contains(logRecord.getTxID())) {
-				sm.queueWrite(logRecord.getKey(), logRecord.getOffset(), logRecord.getValue());
-				latestValues.put(logRecord.getKey(), new TaggedValue(logRecord.getOffset(), logRecord.getValue()));
-			}
+			sm.queueWrite(logRecord.getKey(), logRecord.getOffset(), logRecord.getValue());
+			latestValues.put(logRecord.getKey(), new TaggedValue(logRecord.getOffset(), logRecord.getValue()));
 		}
 	}
 
@@ -186,9 +184,10 @@ public class TransactionManager {
 		LogRecord logRecord = new LogRecord();
 		logRecord.setType(LogRecordType.START_TXN);
 		logRecord.setTxID(txID);
-		int offset = lm.appendLogRecord(logRecord.getByteArray(bArray));
+		logRecord.setPreOffset(preLogPos);
+		preLogPos = lm.appendLogRecord(logRecord.getByteArray(bArray));
 		activeTxns.add(txID);
-		earlistTxns.put(txID, offset);
+		earlistTxns.put(txID, preLogPos);
 		//doCheckPoint();
 	}
 
@@ -243,7 +242,8 @@ public class TransactionManager {
 			logRecord.setActiveTxns(txns);
 			logRecord.setActiveTxnStartEarlistOffset(earlistLogSize);
 			logRecord.setType(LogRecordType.START_CKPT);
-			lm.appendLogRecord(logRecord.getByteArray(bArray));
+			logRecord.setPreOffset(preLogPos);
+			preLogPos = lm.appendLogRecord(logRecord.getByteArray(bArray));
 			isInCKPT = true;
 
 			commitTxnsInCkpt.clear();	// 清除之前的
@@ -261,13 +261,12 @@ public class TransactionManager {
 	 */
 	public void commit(long txID) {
 		activeTxns.remove(txID);	// 已提交，则从当前活跃事务集合中删掉
-		commitTxns.add(txID);
+		commitTxns.add(txID);			// 添加到已提交集合中
 
 //		ArrayList<WritesetEntry> writeset = writesets.get(txID);
 		HashMap<Long, byte[]> writeset = writesets.get(txID);
 		ArrayList<LogRecord> logRecords = new ArrayList<>();
 		if (writeset != null) {
-			int tag = -1;
 //			for(WritesetEntry x : writeset) {
 			for (Entry<Long, byte[]> x: writeset.entrySet()) {
 				// 添加日志
@@ -276,12 +275,13 @@ public class TransactionManager {
 				logRecord.setType(LogRecordType.OPERATION);
 				logRecord.setKey(x.getKey());
 				logRecord.setValue(x.getValue());
-				tag = lm.appendLogRecord(logRecord.getByteArray(bArray));
-				latestValues.put(x.getKey(), new TaggedValue(tag, x.getValue()));
+				logRecord.setPreOffset(preLogPos);
+				preLogPos = lm.appendLogRecord(logRecord.getByteArray(bArray));
+				latestValues.put(x.getKey(), new TaggedValue(preLogPos, x.getValue()));
 				HashMap<Long, Integer> txn = txnsOffsetMap.getOrDefault(txID, new HashMap<>());
-				txn.put(x.getKey(), tag);
+				txn.put(x.getKey(), preLogPos);
 				txnsOffsetMap.put(txID, txn);
-				logRecord.setOffset(tag);
+				logRecord.setOffset(preLogPos);
 				logRecords.add(logRecord);
 			}
 			writesets.remove(txID);
@@ -291,28 +291,20 @@ public class TransactionManager {
 		logRecord.setTxID(txID);
 		logRecord.setType(LogRecordType.COMMIT_TXN);
 		logRecord.setTxID(txID);
-		lm.appendLogRecord(logRecord.getByteArray(bArray));
+		logRecord.setPreOffset(preLogPos);
+		preLogPos = lm.appendLogRecord(logRecord.getByteArray(bArray));
 
+		// 先写日志再写数据到sm
 		for (LogRecord logRecord1 : logRecords) {
 			sm.queueWrite(logRecord1.getKey(), logRecord1.getOffset(), logRecord1.getValue());	// 异步的
 		}
 
 		//doCheckPoint();
-//		for (LogRecord logRecord1 : logRecords) {
-//			sm.queueWrite(logRecord1.getKey(), logRecord1.getOffset(), logRecord1.getValue());	// 异步的
-//		}
 	}
 	/**
 	 * Aborts a transaction.
 	 */
 	public void abort(long txID) {
-		// 添加日志
-//		LogRecord logRecord = new LogRecord();
-//		logRecord.setTxID(txID);
-//		logRecord.setType(LogRecordType.ABORT_TXN);
-//		logRecord.setTxID(txID);
-//		lm.appendLogRecord(logRecord.getByteArray(bArray));
-
 		writesets.remove(txID);
 		activeTxns.remove(txID);
 		//doCheckPoint();
@@ -324,6 +316,7 @@ public class TransactionManager {
 	 */
 	public void writePersisted(long key, long persisted_tag, byte[] persisted_value) {	// 表明该数据已经持久化了
 		doCheckPoint();
+		// 根据持久化的数据判断当前以提交集合事务中有哪些事务已经持久化了
 		ArrayList<Long> txns = new ArrayList<>();
 		for (Long txnId : commitTxns) {
 			if (txnsOffsetMap.containsKey(txnId)) {
@@ -331,7 +324,7 @@ public class TransactionManager {
 						&& txnsOffsetMap.get(txnId).get(key) <= persisted_tag) {
 					txnsOffsetMap.get(txnId).remove(key);
 				}
-				if (txnsOffsetMap.get(txnId).size() == 0) {
+				if (txnsOffsetMap.get(txnId).size() == 0) { // txnId的事务已经没有待持久化的数据
 					txns.add(txnId);
 					persistTxns.add(txnId);
 				}
@@ -342,11 +335,13 @@ public class TransactionManager {
 			commitTxns.remove(txnId);
 		}
 
+		// 当前处于检查点阶段且检查点建立时提交的事务已经持久化，则结束检查点阶段
 		if (isInCKPT && canEndCkpt()) {
 			// 添加检查点结束日志记录
 			LogRecord logRecord = new LogRecord();
 			logRecord.setType(LogRecordType.END_CKPT);
-			lm.appendLogRecord(logRecord.getByteArray(bArray));
+			logRecord.setPreOffset(preLogPos);
+			preLogPos = lm.appendLogRecord(logRecord.getByteArray(bArray));
 			lm.setLogTruncationOffset(trunctionPos);	// 截断用于快速恢复
 			isInCKPT = false;
 		}
@@ -354,6 +349,7 @@ public class TransactionManager {
 
 	/**
 	 * 判断是否可以结束检查点操作
+	 * 如果建立检查点时已commit事务集合已经都持久化好则可以执行结束检查点操作
 	 * @return true 表示是， false 表示否
 	 */
 	private boolean canEndCkpt() {

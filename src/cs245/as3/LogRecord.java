@@ -36,10 +36,10 @@ public class LogRecord {
    */
   private byte[] value; // 可变
 
-//  /**
-//   * 上一条日志记录偏移量
-//   */
-//  private long preOffset; // 8字节 todo int 加一个这个字段降低读的次数
+  /**
+   * 上一条日志记录偏移量
+   */
+  private int preOffset; // 4字节
 
   /**
    * 活跃事务数量 用于生成检查点 具体实现用activeTxns.size()获得
@@ -54,7 +54,7 @@ public class LogRecord {
   /**
    * 活跃事务集合中最早开始的偏移量
    */
-  private int activeTxnStartEarlistOffset; // 8字节
+  private int activeTxnStartEarlistOffset; // 4字节
 
   /**
    * 日志记录的大小
@@ -130,16 +130,24 @@ public class LogRecord {
     this.activeTxnStartEarlistOffset = activeTxnStartEarlistOffset;
   }
 
+  public int getPreOffset() {
+    return preOffset;
+  }
+
+  public void setPreOffset(int preOffset) {
+    this.preOffset = preOffset;
+  }
+
   public byte[] getByteArray(ByteArrayOutputStream arrayOutputStream) {
     arrayOutputStream.write(type);  // 主要是type取值范围比较小可以用1字节
     switch (type) {
       case LogRecordType.START_TXN:
-        size = 1 + 8 + 4; // type + txID + size;
+        size = 17; // type + txID + preOffset + size;
         byte[] b = BytesUtils.longToByte(txID);
         arrayOutputStream.write(b, 0, b.length);
         break;
       case LogRecordType.OPERATION:
-        size = 1 + 8 + 8 + value.length + 4; // type + txID + key + value + size;
+        size = 25 + value.length; // type + txID + key + value + preOffset + size;
         b = BytesUtils.longToByte(txID);
         arrayOutputStream.write(b, 0, b.length);
         b = BytesUtils.longToByte(key);
@@ -147,12 +155,12 @@ public class LogRecord {
         arrayOutputStream.write(value, 0, value.length);
         break;
       case LogRecordType.COMMIT_TXN:
-        size = 1 + 8 + 4; // type + txID + size;
+        size = 17; // type + txID + preOffset + size;
         b = BytesUtils.longToByte(txID);
         arrayOutputStream.write(b, 0, b.length);
         break;
       case LogRecordType.START_CKPT:
-        size = 1 + activeTxns.size() * 8 + 4 + 4; // type + activeTSize * 8 + activeTxnStartEarlistOffset + size;
+        size = activeTxns.size() * 8 + 13; // type + activeTSize * 8 + activeTxnStartEarlistOffset + preOffset + size;
 //        b = BytesUtils.intToByte(activeTxns.size());
 //        arrayOutputStream.write(b, 0, b.length);
         for (long txnId : activeTxns) {
@@ -163,16 +171,18 @@ public class LogRecord {
         arrayOutputStream.write(b, 0, b.length);
         break;
       case LogRecordType.END_CKPT:
-        size = 1 + 4; // type + size;
+        size = 9; // type + preOffset + size; 1 + 4 + 4
         break;
       default:
         // abort
-        size = 1 + 8 + 4; // type + txnId + size
+        size = 17; // type + txnId + preOffset + size 1 + 8 + 4 + 4
         b = BytesUtils.longToByte(txID);
         arrayOutputStream.write(b, 0, b.length);
     }
 
-    byte[] b = BytesUtils.intToByte(size);
+    byte[] b = BytesUtils.intToByte(preOffset);
+    arrayOutputStream.write(b, 0, b.length);
+    b = BytesUtils.intToByte(size);
     arrayOutputStream.write(b, 0, b.length);
 
     // flush
@@ -200,13 +210,14 @@ public class LogRecord {
         key == logRecord.key &&
         activeTxnStartEarlistOffset == logRecord.activeTxnStartEarlistOffset &&
         size == logRecord.size &&
+        preOffset == logRecord.preOffset &&
         Arrays.equals(value, logRecord.value) &&
         Objects.equals(activeTxns, logRecord.activeTxns);
   }
 
   @Override
   public int hashCode() {
-    int result = Objects.hash(type, txID, key, activeTxns, activeTxnStartEarlistOffset, size);
+    int result = Objects.hash(type, txID, key, activeTxns, activeTxnStartEarlistOffset, preOffset, size);
     result = 31 * result + Arrays.hashCode(value);
     return result;
   }

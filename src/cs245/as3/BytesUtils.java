@@ -89,13 +89,13 @@ public class BytesUtils {
 
     switch (type) {
       case LogRecordType.START_TXN:
-        // type + txID + size; 1 + 8 + 4
+        // type + txID + preOffset + size; 1 + 8 + 4 + 4
         input.read(longByte, 0, 8);
         long txnId = byteToLong(longByte);
         logRecord.setTxID(txnId); // txnId
         break;
       case LogRecordType.OPERATION:
-        // type + txID + key + value + size; 1 + 8 + 8 + value.length + 4
+        // type + txID + key + value + preOffset + size; 1 + 8 + 8 + value.length + 4 + 4
         input.read(longByte, 0, 8);
         txnId = byteToLong(longByte);
         logRecord.setTxID(txnId); // txnId
@@ -103,19 +103,19 @@ public class BytesUtils {
         input.read(longByte, 0, 8);
         long key = byteToLong(longByte);
         logRecord.setKey(key);  // key
-        byte[] v = new byte[input.available() - 4];
+        byte[] v = new byte[input.available() - 8];
         input.read(v, 0, v.length);
         logRecord.setValue(v);  // value
         break;
       case LogRecordType.COMMIT_TXN:
-        // type + txID + size; 1 + 8 + 4
+        // type + txID + preOffset + size; 1 + 8 + 4 + 4
         input.read(longByte, 0, 8);
         txnId = byteToLong(longByte);
         logRecord.setTxID(txnId); // txnId
         break;
       case LogRecordType.START_CKPT:
-        // type + activeTSize * 8 + activeTxnStartEarlistOffset + size; 1 + activeTxns.size() * 8 + 4 + 4
-        int activeTSize = (arr.length - 1 - 4 - 4) / 8;
+        // type + activeTSize * 8 + activeTxnStartEarlistOffset + preOffset + size; 1 + activeTxns.size() * 8 + 4 + 4 + 4
+        int activeTSize = (arr.length - 13) / 8; // -1 - 4 - 4 - 4
         ArrayList<Long> txnIds = new ArrayList<>();
         for (int i = 0; i < activeTSize; i ++) {
           input.read(longByte, 0, 8);
@@ -127,7 +127,7 @@ public class BytesUtils {
         logRecord.setActiveTxnStartEarlistOffset(byteToInt(intByte)); // activeTxnStartEarlistOffset
         break;
       case LogRecordType.END_CKPT:
-        // type + size; 1 + 4
+        // type + preOffset + size; 1 + 4 + 4
         break;
       default:
         // abort
@@ -135,6 +135,10 @@ public class BytesUtils {
         txnId = byteToLong(longByte);
         logRecord.setTxID(txnId); // txnId
     }
+
+    input.read(intByte, 0, 4);
+    int preOffset = byteToInt(intByte);
+    logRecord.setPreOffset(preOffset);
 
     input.read(intByte, 0, 4);
     int size = byteToInt(intByte);
